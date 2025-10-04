@@ -41,6 +41,13 @@
             <div id="results-container" class="mt-8">
                 <!-- Analysis results will be injected here -->
             </div>
+             <!-- Container for the copy button, initially hidden -->
+            <div id="copy-container" class="text-center mt-6" style="display: none;">
+                <button id="copy-btn" class="bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-101 devanagari text-lg">
+                    विश्लेषण टेक्स्ट कॉपी करें
+                </button>
+                <span id="copy-feedback" class="text-green-600 ml-2 font-semibold" style="display: none;">कॉपी हो गया!</span>
+            </div>
             
             <div class="mt-10 p-6 bg-teal-50 border border-teal-200 rounded-xl">
                 <h2 class="text-2xl font-bold text-teal-800 devanagari mb-4">मनहरण घनाक्षरी के नियम</h2>
@@ -88,26 +95,24 @@
         const analyzeBtn = document.getElementById('analyze-btn');
         const textInput = document.getElementById('text-input');
         const resultsContainer = document.getElementById('results-container');
+        const copyContainer = document.getElementById('copy-container');
+        const copyBtn = document.getElementById('copy-btn');
+        const copyFeedback = document.getElementById('copy-feedback');
+        
+        // This will hold the structured analysis data to be used for HTML rendering and text generation.
+        let analysisData = {};
 
         // This regex is the core of the varna counting logic.
-        // It matches a consonant cluster followed by an optional vowel sign, OR a standalone vowel.
-        // Updated to handle nukta characters (e.g., ज़, फ़) correctly.
         const varnaRegex = /(?:[क-ह\u0958-\u095F]़?्)*[क-ह\u0958-\u095F]़?[ा-ौःँं]?|[अ-औ]/g;
-
         
-        // Vowels that make a syllable 'Guru' (long)
-        // Updated to include standalone long vowels (e.g., ई, आ).
         const guruVowels = /[आईऊएऐओऔाीूृॄेैोौःं]/;
-        const consonants = /[क-ह]/;
         const allSwar = /[अ-औ]/;
         const matraMap = {
             'ा': 'आ', 'ि': 'इ', 'ी': 'ई', 'ु': 'उ', 'ू': 'ऊ', 'ृ': 'ऋ', 'ॄ': 'ॠ',
             'े': 'ए', 'ै': 'ऐ', 'ो': 'ओ', 'ौ': 'औ', 'ं': 'अं', 'ः': 'अः', 'ँ': 'अँ'
         };
 
-
         function countVarnas(text) {
-            // Removes punctuation and extraneous characters before counting.
             const cleanedText = text.replace(/[।,।?!\-]/g, '').trim();
             const matches = cleanedText.match(varnaRegex);
             return matches ? matches.length : 0;
@@ -121,27 +126,13 @@
 
         function isGuru(varna) {
             if (!varna) return false;
-            // Rule 1: Contains a long vowel, visarga, or anusvara.
-            if (guruVowels.test(varna)) {
-                return true;
-            }
-            // Rule 2: Followed by a conjunct consonant. This is complex to check perfectly without context of the *next* varna.
-            // A simplified check: if the varna ends in a short vowel but is followed by a conjunct.
-            // The provided document is simpler: "प्रत्येक पद का अंतिम वर्ण गुरु (दीर्घ) होना अनिवार्य है"
-            // We will primarily check the vowel sound. 'क्ष', 'त्र', 'ज्ञ' are conjuncts themselves.
-            // If the last letter is a conjunct, the preceding short vowel becomes guru.
-            // For the last varna, we can just check its own composition.
-            return false;
+            return guruVowels.test(varna);
         }
 
         function getVowelOfVarna(varna) {
-            if (allSwar.test(varna)) {
-                return varna;
-            }
+            if (allSwar.test(varna)) return varna;
             const matra = varna.match(/[ा-ौःँं]/);
-            if (matra) {
-                return matraMap[matra[0]] || null;
-            }
+            if (matra) return matraMap[matra[0]] || null;
             return 'अ'; // Implicit 'a'
         }
 
@@ -149,43 +140,32 @@
             if (!kaafiya || kaafiya.length === 0) {
                  return { valid: false, reason: 'काफ़िया शब्दों में कोई सामान्य वर्ण-अंश नहीं है।' };
             }
-            
             const varnasInKaafiya = getVarnas(kaafiya);
             const hasRadeef = radeef && radeef.length > 0;
 
-            // Rule 1: A kaafiya made of a single 'akshar' (varna) is always invalid.
-            // This covers both single vowels ('आ') and single consonant-vowel combinations ('ता').
             if (varnasInKaafiya.length === 1) {
                 return { valid: false, reason: `काफ़िया ('${kaafiya}') केवल एक अक्षर है, जो मान्य नहीं है।` };
             }
-
-            // Rule 2: A kaafiya made of a short vowel + one 'akshar' is invalid, UNLESS a radeef is present.
             const shortVowels = ['अ', 'इ', 'उ', 'ऋ'];
             const firstChar = kaafiya.charAt(0);
             if (allSwar.test(firstChar) && shortVowels.includes(firstChar)) {
                 const restOfKaafiya = kaafiya.substring(1);
                 const restVarnas = getVarnas(restOfKaafiya);
                 if (restVarnas.length === 1) {
-                    if (hasRadeef) {
-                        return { valid: true, reason: 'मान्य तुकांतता (रदीफ़ की उपस्थिति के कारण)।' };
-                    } else {
-                        return { valid: false, reason: `काफ़िया ('${kaafiya}') लघु स्वर + एक अक्षर से बना है और कोई रदीफ़ नहीं है, जो मान्य नहीं है।` };
-                    }
+                    return hasRadeef ? { valid: true, reason: 'मान्य तुकांतता (रदीफ़ की उपस्थिति के कारण)।' } : { valid: false, reason: `काफ़िया ('${kaafiya}') लघु स्वर + एक अक्षर से बना है और कोई रदीफ़ नहीं है, जो मान्य नहीं है।` };
                 }
             }
-
             return { valid: true, reason: 'मान्य तुकांतता।' };
         }
 
         function analyzeChhandRhyme(chunk) {
-            if (chunk.length < 2) return { overallRhymeStatus: true, results: [] };
+             if (chunk.length < 2) return { overallRhymeStatus: true, results: [] };
 
             const normalizeForRadeef = (word) => word.replace(/[ं़]/g, '');
-            const hindiWordRegex = /[क-हअ-औ]/; // Regex to check for at least one Devanagari character
+            const hindiWordRegex = /[क-हअ-औ]/; 
             const padWords = chunk.map(p => {
                 if (p.isOrphan) return [];
                 const words = p.text.split(/\s+/).filter(w => w);
-                // From the end of the array, find the last word that is a valid Hindi word.
                 let lastValidIndex = words.length;
                 while (lastValidIndex > 0 && !hindiWordRegex.test(words[lastValidIndex - 1])) {
                     lastValidIndex--;
@@ -193,7 +173,6 @@
                 return words.slice(0, lastValidIndex);
             });
 
-            // 1. Find common Radeef
             let radeef = [];
             let radeefLength = 0;
             let isRadeefPure = true;
@@ -212,7 +191,6 @@
                         break;
                     }
                 }
-
                 if (allMatch) {
                     radeef.unshift(potentialWord);
                     radeefLength++;
@@ -227,7 +205,6 @@
             }
             const baseRadeef = radeef.join(' ');
             
-            // 2. Extract all Kaafiya words
             const kaafiyaWords = [];
             let noKaafiyaWordError = false;
             for (const words of padWords) {
@@ -239,7 +216,6 @@
                 }
             }
 
-            // 3. Find longest common Kaafiya across all words, then validate it.
             let baseKaafiya = null;
             let kaafiyaValidationResult = { valid: false, reason: 'कोई काफ़िया शब्द नहीं मिला।' };
 
@@ -256,21 +232,17 @@
                         break;
                     }
                 }
-
                 let kaafiyaCandidate = commonSuffixVarnas.join('');
 
-                // If no direct varna suffix matches, check for a vowel-only match in the final varna.
                 if (kaafiyaCandidate.length === 0 && kaafiyaWords.length > 0) {
                     const lastVowels = allVarnas.map(v => v.length > 0 ? getVowelOfVarna(v[v.length - 1]) : null);
                     if (lastVowels.every(v => v && v === lastVowels[0])) {
                         kaafiyaCandidate = lastVowels[0];
                     }
                 } 
-                // Else if a varna suffix was found, check if it can be extended with a preceding vowel sound.
                 else if (kaafiyaCandidate.length > 0) {
                     const suffixLength = commonSuffixVarnas.length;
                     const allHavePrecedingVarna = allVarnas.every(v => v.length > suffixLength);
-
                     if (suffixLength === 1 && allHavePrecedingVarna) {
                         const precedingVowels = allVarnas.map(v => getVowelOfVarna(v[v.length - suffixLength - 1]));
                         if (precedingVowels.every(v => v === precedingVowels[0])) {
@@ -280,16 +252,13 @@
                 }
                 
                 if (kaafiyaCandidate) {
-                    // Assign the longest common suffix as the baseKaafiya, regardless of validity.
                     baseKaafiya = kaafiyaCandidate;
-                    // Then, validate it to determine the overall status.
                     kaafiyaValidationResult = validateKaafiya(baseKaafiya, baseRadeef);
                 } else {
                      kaafiyaValidationResult.reason = 'काफ़िया शब्दों में कोई सामान्य वर्ण-अंश नहीं है।';
                 }
             }
 
-            // 4. Build results for each pad
             let results = [];
             const overallRhymeStatus = kaafiyaValidationResult.valid;
 
@@ -301,31 +270,146 @@
                 }
                 
                 const status = (i === 0) ? 'base' : (overallRhymeStatus ? 'success' : 'fail');
-                let reason = '';
-                if (i > 0) {
-                    reason = overallRhymeStatus ? 'छंद के आधार से मेल खाता है।' : kaafiyaValidationResult.reason;
-                }
+                let reason = (i > 0) ? (overallRhymeStatus ? 'छंद के आधार से मेल खाता है।' : kaafiyaValidationResult.reason) : '';
                 
-                results.push({
-                    padIndex: chunk[i].padIndex,
-                    pad: chunk[i],
-                    status,
-                    reason,
-                    kaafiyaWord,
-                    kaafiya: baseKaafiya || 'N/A',
-                    radeef: baseRadeef,
-                    isRadeefPure
-                });
+                results.push({ padIndex: chunk[i].padIndex, pad: chunk[i], status, reason, kaafiyaWord, kaafiya: baseKaafiya || 'N/A', radeef: baseRadeef, isRadeefPure });
             }
-            
             return { overallRhymeStatus, results, baseKaafiya, baseRadeef, isRadeefPure };
         }
 
+        function generateAnalysisText() {
+            let text = '🟥Analysis:\n';
+            let rhymeDataIndex = 0;
+
+            for (let i = 0; i < analysisData.pads.length; i += 4) {
+                const chunkPads = analysisData.pads.slice(i, i + 4);
+                const rhymeInfo = analysisData.rhymes[rhymeDataIndex];
+                const startPad = i + 1;
+                const endPad = i + chunkPads.length;
+
+                text += `\nChhand ${rhymeDataIndex + 1}: (pad ${startPad} to pad ${endPad})\n`;
+
+                let allVarnaCorrect = true;
+                let varnaIssues = [];
+                chunkPads.forEach(pad => {
+                    if (pad.isOrphan) {
+                        allVarnaCorrect = false;
+                        varnaIssues.push(`pad ${pad.padIndex} adhoora hai`);
+                    } else if (pad.count1 !== 16 || pad.count2 !== 15) {
+                        allVarnaCorrect = false;
+                        varnaIssues.push(`pad ${pad.padIndex} mein ${pad.count1},${pad.count2} hai`);
+                    }
+                });
+
+                if (allVarnaCorrect) {
+                    text += `✅ 16,15 varna count ko follow kiya hai har pad mein.\n`;
+                } else {
+                    text += `❌ ${varnaIssues.join(', ')}\n`;
+                }
+
+                if (rhymeInfo && chunkPads.length > 1) {
+                    if (rhymeInfo.overallRhymeStatus) {
+                        text += `✅ Rhyming bhi hai chaaro pad mein (Radeef: ${rhymeInfo.baseRadeef || 'koi nahi'}, Kafiya: ${rhymeInfo.baseKaafiya})\n`;
+                    } else {
+                        text += `❌ Pado ke beech rhyming nahi hai (Radeef: ${rhymeInfo.baseRadeef || 'koi nahi'}, Kafiya: ${rhymeInfo.baseKaafiya || 'N/A'})\n`;
+                    }
+                }
+                rhymeDataIndex++;
+            }
+            return text;
+        }
+        
+        function renderHTML() {
+            resultsContainer.innerHTML = '';
+
+            // Render individual pad analysis
+            analysisData.pads.forEach(pad => {
+                 if (pad.isOrphan) {
+                    const orphanPadResult = document.createElement('div');
+                    orphanPadResult.className = 'mb-6 p-5 bg-red-50 border border-red-200 rounded-lg shadow-sm';
+                    orphanPadResult.innerHTML = `<p class="font-semibold text-red-700">पद ${pad.padIndex} अधूरा है। घनाक्षरी में प्रत्येक पद के दो भाग होने चाहिए।</p><p class="devanagari text-red-600 mt-2">${pad.lines[0]}</p>`;
+                    resultsContainer.appendChild(orphanPadResult);
+                    return;
+                }
+                
+                const padResult = document.createElement('div');
+                padResult.className = 'mb-6 p-5 bg-white border border-gray-200 rounded-lg shadow-sm animate-fade-in';
+                let resultsHTML = `<h3 class="text-xl font-bold text-teal-700 border-b pb-2 mb-4 devanagari">पद ${pad.padIndex} का विश्लेषण</h3>`;
+                resultsHTML += `<div class="space-y-3">`;
+                resultsHTML += `<div class="p-3 bg-gray-50 rounded-md"><p class="devanagari text-lg">${pad.lines[0]} <span class="font-sans font-semibold text-teal-800 ml-2">➜ ${pad.count1} वर्ण</span></p></div>`;
+                resultsHTML += `<div class="p-3 bg-gray-50 rounded-md"><p class="devanagari text-lg">${pad.lines[1]} <span class="font-sans font-semibold text-teal-800 ml-2">➜ ${pad.count2} वर्ण</span></p></div>`;
+                resultsHTML += `</div><div class="mt-4 pt-4 border-t border-gray-200 space-y-2">`;
+                resultsHTML += pad.totalCount === 31 ? `<p class="font-semibold text-green-700">✅ कुल योग: ${pad.totalCount} वर्ण (नियम के अनुसार)</p>` : `<p class="font-semibold text-red-700">❌ कुल योग: ${pad.totalCount} वर्ण (31 होने चाहिए)</p>`;
+                resultsHTML += (pad.count1 === 16 && pad.count2 === 15) ? `<p class="font-semibold text-green-700">✅ यति विधान: 16, 15 (नियम के अनुसार)</p>` : `<p class="font-semibold text-red-700">❌ यति विधान: ${pad.count1}, ${pad.count2} (16, 15 होना चाहिए)</p>`;
+                resultsHTML += pad.lastVarnaIsGuru ? `<p class="font-semibold text-green-700">✅ पदांत: अंतिम वर्ण गुरु है ('${pad.lastVarna}')</p>` : `<p class="font-semibold text-red-700">❌ पदांत: अंतिम वर्ण गुरु नहीं है ('${pad.lastVarna}')</p>`;
+                resultsHTML += '</div>';
+                padResult.innerHTML = resultsHTML;
+                resultsContainer.appendChild(padResult);
+            });
+
+            // Render rhyme analysis
+            analysisData.rhymes.forEach(chhandAnalysis => {
+                if (chhandAnalysis.results.length < 2) return;
+
+                const rhymeResultDiv = document.createElement('div');
+                rhymeResultDiv.className = 'mt-8 mb-6 p-5 bg-indigo-50 border border-indigo-200 rounded-lg shadow-sm animate-fade-in';
+                const startPad = chhandAnalysis.results[0].padIndex;
+                const endPad = chhandAnalysis.results[chhandAnalysis.results.length - 1].padIndex;
+                
+                let rhymeHTML = `<h3 class="text-xl font-bold text-indigo-700 border-b border-indigo-200 pb-2 mb-4 devanari">तुकांतता विश्लेषण (पद ${startPad}-${endPad})</h3>`;
+                rhymeHTML += `<div class="p-4 bg-white rounded-lg border">`;
+
+                const { overallRhymeStatus, results, baseKaafiya, baseRadeef, isRadeefPure } = chhandAnalysis;
+
+                if (baseKaafiya && baseKaafiya !== 'N/A') {
+                    const radeefPurityNote = isRadeefPure ? '' : `<span class="text-orange-600 font-normal text-xs">(अशुद्ध रदीफ़)</span>`;
+                    rhymeHTML += `<p class="text-sm mb-4 text-center"><strong>छंद का आधार:</strong> काफ़िया <span class="font-semibold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded">"${baseKaafiya}"</span>, रदीफ़ <span class="font-semibold text-green-800 bg-green-100 px-1.5 py-0.5 rounded">"${baseRadeef || 'कोई नहीं'}"</span> ${radeefPurityNote}</p>`;
+                } else {
+                     rhymeHTML += `<p class="text-sm text-red-600 mb-4 text-center">⚠️ इन पदों में तुकांतता नहीं मिली, इसलिए छंद का आधार स्थापित नहीं किया जा सका।</p>`;
+                }
+                const highlightLine = (line, kaafiyaWord, radeefStr) => {
+                    if (!kaafiyaWord || !line) return line;
+                    const lineEnd = (kaafiyaWord + ' ' + radeefStr).trim();
+                    if (line.endsWith(lineEnd)) {
+                        const mainPart = line.substring(0, line.length - lineEnd.length);
+                        return `${mainPart}<span class="font-semibold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded">${kaafiyaWord}</span>` + (radeefStr ? ` <span class="font-semibold text-green-800 bg-green-100 px-1.5 py-0.5 rounded">${radeefStr}</span>` : '');
+                    }
+                    return line;
+                };
+                rhymeHTML += `<div class="space-y-5">`;
+                results.forEach(res => {
+                    const line = res.pad.lines[1] || res.pad.lines[0];
+                    const highlightedLine = highlightLine(line, res.kaafiyaWord, res.radeef);
+                    let statusIcon = res.status === 'base' ? '<span class="text-gray-500 font-bold">(आधार)</span>' : (res.status === 'success' ? '<span class="text-green-600 font-bold">✅ मेल खाता है</span>' : `<span class="text-red-600 font-bold">❌ मेल नहीं खाता</span>`);
+                    
+                    rhymeHTML += `<div class="border-t pt-3"><p class="font-semibold mb-2 text-gray-800">पद ${res.padIndex}: ${statusIcon}</p>`;
+                    rhymeHTML += `<div class="p-3 bg-gray-50 rounded-md devanagari text-lg mb-2">${highlightedLine}</div>`;
+                    rhymeHTML += `<div class="text-xs text-gray-700 space-y-1 border-l-2 border-indigo-100 pl-3 ml-1">`;
+                    const radeefPurityNote = res.isRadeefPure ? '' : '<em class="text-orange-600 ml-1">(अनुस्वार/नुक़्ते के कारण अशुद्ध)</em>';
+                    rhymeHTML += `<p><strong>रदीफ़:</strong> ${res.radeef ? `<span class="font-semibold text-green-800 bg-green-100 px-1 py-0.5 rounded">${res.radeef}</span>${radeefPurityNote}` : '<em>कोई नहीं</em>'}</p>`;
+                    if (res.kaafiyaWord) {
+                        const kaafiyaSound = res.kaafiya || 'N/A';
+                        const kaafiyaCheckIcon = overallRhymeStatus ? '✅' : '❌';
+                        rhymeHTML += `<p><strong>काफ़िया शब्द:</strong> <span class="font-semibold text-blue-800 bg-blue-100 px-1 py-0.5 rounded">${res.kaafiyaWord}</span> में काफ़िया "${kaafiyaSound}" की उपस्थिति ${kaafiyaSound === 'N/A' ? '❌' : kaafiyaCheckIcon}</p>`;
+                    }
+                    if (res.status !== 'base') rhymeHTML += `<p><strong>स्थिति:</strong> <em class="${res.status === 'fail' ? 'text-red-700' : 'text-green-700'}">${res.reason}</em></p>`;
+                    rhymeHTML += `</div></div>`;
+                });
+                rhymeHTML += `</div>`;
+                rhymeHTML += `<div class="mt-5 pt-4 border-t text-center">`;
+                rhymeHTML += overallRhymeStatus && baseKaafiya && baseKaafiya !== 'N/A' ? `<p class="font-bold text-green-700">✅ इस छंद के सभी पद समतुकांत हैं।</p>` : `<p class="font-bold text-red-700">❌ इस छंद के सभी पद समतुकांत नहीं हैं।</p>`;
+                rhymeHTML += `</div></div>`;
+                rhymeResultDiv.innerHTML = rhymeHTML;
+                resultsContainer.appendChild(rhymeResultDiv);
+            });
+        }
 
         function analyzeGhanakshari() {
             const text = textInput.value;
             const lines = text.split('\n').filter(line => line.trim() !== '');
             resultsContainer.innerHTML = '';
+            copyContainer.style.display = 'none';
+            analysisData = { pads: [], rhymes: [] };
 
             if (lines.length === 0) {
                 resultsContainer.innerHTML = '<p class="text-center text-red-500">कृपया विश्लेषण के लिए कुछ टेक्स्ट दर्ज करें।</p>';
@@ -333,167 +417,64 @@
             }
             
             let allPads = [];
-            // Process lines in pairs to form pads
             for (let i = 0; i < lines.length; i += 2) {
                  if (i + 1 < lines.length) {
-                    const part1 = lines[i].replace(/[।,।?!\-]/g, '').trim();
-                    const part2 = lines[i+1].replace(/[।,।?!\-]/g, '').trim();
-                    allPads.push({
-                        text: `${part1} ${part2}`,
-                        lines: [lines[i], lines[i+1]]
-                    });
+                    allPads.push({ text: `${lines[i].trim()} ${lines[i+1].trim()}`, lines: [lines[i], lines[i+1]] });
                  } else {
-                     allPads.push({
-                         text: lines[i].replace(/[।,।?!\-]/g, '').trim(),
-                         lines: [lines[i]],
-                         isOrphan: true
-                     });
+                     allPads.push({ text: lines[i].trim(), lines: [lines[i]], isOrphan: true });
                  }
             }
 
-            // Analyze each pad for varna counts
             allPads.forEach((pad, index) => {
-                if (pad.isOrphan) {
-                    const orphanPadResult = document.createElement('div');
-                    orphanPadResult.className = 'mb-6 p-5 bg-red-50 border border-red-200 rounded-lg shadow-sm';
-                    orphanPadResult.innerHTML = `<p class="font-semibold text-red-700">पद ${index + 1} अधूरा है। घनाक्षरी में प्रत्येक पद के दो भाग होने चाहिए।</p><p class="devanagari text-red-600 mt-2">${pad.lines[0]}</p>`;
-                    resultsContainer.appendChild(orphanPadResult);
-                    return;
+                let padData = { padIndex: index + 1, ...pad };
+                if (!pad.isOrphan) {
+                    const part1 = pad.lines[0];
+                    const part2 = pad.lines[1];
+                    padData.count1 = countVarnas(part1);
+                    padData.count2 = countVarnas(part2);
+                    padData.totalCount = padData.count1 + padData.count2;
+                    const allVarnas = getVarnas(pad.text);
+                    padData.lastVarna = allVarnas.length > 0 ? allVarnas[allVarnas.length - 1] : null;
+                    padData.lastVarnaIsGuru = isGuru(padData.lastVarna);
                 }
-                
-                const part1 = pad.lines[0];
-                const part2 = pad.lines[1];
-
-                const count1 = countVarnas(part1);
-                const count2 = countVarnas(part2);
-                const totalCount = count1 + count2;
-
-                const allVarnas = getVarnas(pad.text);
-                const lastVarna = allVarnas.length > 0 ? allVarnas[allVarnas.length - 1] : null;
-                const lastVarnaIsGuru = isGuru(lastVarna);
-                
-                const padResult = document.createElement('div');
-                padResult.className = 'mb-6 p-5 bg-white border border-gray-200 rounded-lg shadow-sm animate-fade-in';
-                
-                let resultsHTML = `<h3 class="text-xl font-bold text-teal-700 border-b pb-2 mb-4 devanagari">पद ${index + 1} का विश्लेषण</h3>`;
-                resultsHTML += `<div class="space-y-3">`;
-                resultsHTML += `<div class="p-3 bg-gray-50 rounded-md"><p class="devanagari text-lg">${part1} <span class="font-sans font-semibold text-teal-800 ml-2">➜ ${count1} वर्ण</span></p></div>`;
-                resultsHTML += `<div class="p-3 bg-gray-50 rounded-md"><p class="devanagari text-lg">${part2} <span class="font-sans font-semibold text-teal-800 ml-2">➜ ${count2} वर्ण</span></p></div>`;
-                resultsHTML += `</div>`;
-                resultsHTML += '<div class="mt-4 pt-4 border-t border-gray-200 space-y-2">';
-
-                // Total Varnas Check
-                if (totalCount === 31) {
-                    resultsHTML += `<p class="font-semibold text-green-700">✅ कुल योग: ${totalCount} वर्ण (नियम के अनुसार)</p>`;
-                } else {
-                    resultsHTML += `<p class="font-semibold text-red-700">❌ कुल योग: ${totalCount} वर्ण (31 होने चाहिए)</p>`;
-                }
-                
-                // Yati Check
-                if (count1 === 16 && count2 === 15) {
-                    resultsHTML += `<p class="font-semibold text-green-700">✅ यति विधान: 16, 15 (नियम के अनुसार)</p>`;
-                } else {
-                    resultsHTML += `<p class="font-semibold text-red-700">❌ यति विधान: ${count1}, ${count2} (16, 15 होना चाहिए)</p>`;
-                }
-                
-                // Guru Check
-                if (lastVarnaIsGuru) {
-                    resultsHTML += `<p class="font-semibold text-green-700">✅ पदांत: अंतिम वर्ण गुरु है ('${lastVarna}')</p>`;
-                } else {
-                    resultsHTML += `<p class="font-semibold text-red-700">❌ पदांत: अंतिम वर्ण गुरु नहीं है ('${lastVarna}')</p>`;
-                }
-                
-                resultsHTML += '</div>';
-                padResult.innerHTML = resultsHTML;
-                resultsContainer.appendChild(padResult);
+                analysisData.pads.push(padData);
             });
 
-            // Analyze rhyming in chunks of up to 4 pads
             for (let i = 0; i < allPads.length; i += 4) {
                 const chunk = allPads.slice(i, i + 4).map((p, idx) => ({ ...p, padIndex: i + 1 + idx }));
-                
                 if (chunk.length > 1) {
-                    const rhymeResultDiv = document.createElement('div');
-                    rhymeResultDiv.className = 'mt-8 mb-6 p-5 bg-indigo-50 border border-indigo-200 rounded-lg shadow-sm animate-fade-in';
-                    const startPad = i + 1;
-                    const endPad = i + chunk.length;
-                    
-                    let rhymeHTML = `<h3 class="text-xl font-bold text-indigo-700 border-b border-indigo-200 pb-2 mb-4 devanari">तुकांतता विश्लेषण (पद ${startPad}-${endPad})</h3>`;
-
-                    const chhandAnalysis = analyzeChhandRhyme(chunk);
-                    const { overallRhymeStatus, results, baseKaafiya, baseRadeef, isRadeefPure } = chhandAnalysis;
-
-                    rhymeHTML += `<div class="p-4 bg-white rounded-lg border">`;
-
-                    if (baseKaafiya && baseKaafiya !== 'N/A') {
-                        const radeefPurityNote = isRadeefPure ? '' : `<span class="text-orange-600 font-normal text-xs">(अशुद्ध रदीफ़)</span>`;
-                        rhymeHTML += `<p class="text-sm mb-4 text-center"><strong>छंद का आधार:</strong> काफ़िया <span class="font-semibold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded">"${baseKaafiya}"</span>, रदीफ़ <span class="font-semibold text-green-800 bg-green-100 px-1.5 py-0.5 rounded">"${baseRadeef || 'कोई नहीं'}"</span> ${radeefPurityNote}</p>`;
-                    } else if (chunk.length > 1) {
-                         rhymeHTML += `<p class="text-sm text-red-600 mb-4 text-center">⚠️ इन पदों में तुकांतता नहीं मिली, इसलिए छंद का आधार स्थापित नहीं किया जा सका।</p>`;
-                    }
-
-                    const highlightLine = (line, kaafiyaWord, radeefStr) => {
-                        if (!kaafiyaWord || !line) return line;
-                        const radeefArr = radeefStr.split(/\s+/).filter(w => w);
-                        const lineEnd = (kaafiyaWord + ' ' + radeefStr).trim();
-                        if (line.endsWith(lineEnd)) {
-                            const mainPart = line.substring(0, line.length - lineEnd.length);
-                            const kaafiyaPart = `<span class="font-semibold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded">${kaafiyaWord}</span>`;
-                            const radeefPart = radeefArr.length > 0 ? ` <span class="font-semibold text-green-800 bg-green-100 px-1.5 py-0.5 rounded">${radeefArr.join(' ')}</span>` : '';
-                            return mainPart + kaafiyaPart + radeefPart;
-                        }
-                        return line;
-                    };
-
-                    rhymeHTML += `<div class="space-y-5">`;
-                    results.forEach(res => {
-                        const line = res.pad.lines[1] || res.pad.lines[0]; // Fallback for orphan lines
-                        const highlightedLine = highlightLine(line, res.kaafiyaWord, res.radeef);
-                        
-                        let statusIcon = '';
-                        if (res.status === 'base') statusIcon = '<span class="text-gray-500 font-bold">(आधार)</span>';
-                        else if (res.status === 'success') statusIcon = '<span class="text-green-600 font-bold">✅ मेल खाता है</span>';
-                        else statusIcon = `<span class="text-red-600 font-bold">❌ मेल नहीं खाता</span>`;
-                        
-                        rhymeHTML += `<div class="border-t pt-3">`;
-                        rhymeHTML += `<p class="font-semibold mb-2 text-gray-800">पद ${res.padIndex}: ${statusIcon}</p>`;
-                        rhymeHTML += `<div class="p-3 bg-gray-50 rounded-md devanagari text-lg mb-2">${highlightedLine}</div>`;
-                        rhymeHTML += `<div class="text-xs text-gray-700 space-y-1 border-l-2 border-indigo-100 pl-3 ml-1">`;
-                        
-                        const radeefPurityNote = res.isRadeefPure ? '' : '<em class="text-orange-600 ml-1">(अनुस्वार/नुक़्ते के कारण अशुद्ध)</em>';
-                        rhymeHTML += `<p><strong>रदीफ़:</strong> ${res.radeef ? `<span class="font-semibold text-green-800 bg-green-100 px-1 py-0.5 rounded">${res.radeef}</span>${radeefPurityNote}` : '<em>कोई नहीं</em>'}</p>`;
-                        
-                        if (res.kaafiyaWord) {
-                            const kaafiyaSound = res.kaafiya || 'N/A';
-                            if (kaafiyaSound === 'N/A') {
-                                rhymeHTML += `<p><strong>काफ़िया शब्द:</strong> <span class="font-semibold text-blue-800 bg-blue-100 px-1 py-0.5 rounded">${res.kaafiyaWord}</span> में कोई साझा काफ़िया नहीं मिला ❌</p>`;
-                            } else {
-                                const kaafiyaCheckIcon = overallRhymeStatus ? '✅' : '❌';
-                                rhymeHTML += `<p><strong>काफ़िया शब्द:</strong> <span class="font-semibold text-blue-800 bg-blue-100 px-1 py-0.5 rounded">${res.kaafiyaWord}</span> में काफ़िया "${kaafiyaSound}" की उपस्थिति ${kaafiyaCheckIcon}</p>`;
-                            }
-                        }
-
-                        if (res.status !== 'base') {
-                           rhymeHTML += `<p><strong>स्थिति:</strong> <em class="${res.status === 'fail' ? 'text-red-700' : 'text-green-700'}">${res.reason}</em></p>`;
-                        }
-                        rhymeHTML += `</div></div>`;
-                    });
-                    rhymeHTML += `</div>`;
-
-                    rhymeHTML += `<div class="mt-5 pt-4 border-t text-center">`;
-                    if (overallRhymeStatus && baseKaafiya && baseKaafiya !== 'N/A') {
-                        rhymeHTML += `<p class="font-bold text-green-700">✅ इस छंद के सभी पद समतुकांत हैं।</p>`;
-                    } else {
-                        rhymeHTML += `<p class="font-bold text-red-700">❌ इस छंद के सभी पद समतुकांत नहीं हैं।</p>`;
-                    }
-                    rhymeHTML += `</div></div>`;
-                    rhymeResultDiv.innerHTML = rhymeHTML;
-                    resultsContainer.appendChild(rhymeResultDiv);
+                    const rhymeAnalysis = analyzeChhandRhyme(chunk);
+                    analysisData.rhymes.push(rhymeAnalysis);
                 }
+            }
+            
+            renderHTML();
+            
+            // Show the copy button if there are results
+            if(analysisData.pads.length > 0){
+                copyContainer.style.display = 'block';
             }
         }
         
-        // Add a simple fade-in animation for results
+        copyBtn.addEventListener('click', () => {
+            const textToCopy = generateAnalysisText();
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = textToCopy;
+            tempTextArea.style.position = 'absolute';
+            tempTextArea.style.left = '-9999px';
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            try {
+                document.execCommand('copy');
+                copyFeedback.style.display = 'inline';
+                setTimeout(() => { copyFeedback.style.display = 'none'; }, 2000);
+            } catch (err) {
+                console.error('Fallback: Oops, unable to copy', err);
+                alert('विश्लेषण कॉपी करने में विफल रहा।');
+            }
+            document.body.removeChild(tempTextArea);
+        });
+
         const style = document.createElement('style');
         style.innerHTML = `
             @keyframes fadeIn {
@@ -511,10 +492,3 @@
 
 </body>
 </html>
-
-
-
-
-
-
-
